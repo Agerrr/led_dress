@@ -28,12 +28,28 @@ class LEDMap {
         uint16_t getDistance(coordinate point_cord, uint16_t led_index);
 };
 
+class TwinkleEffect {
+
+    public:
+
+        void update(LEDMap *ledMap) {
+            for(int i = 0; i < NUM_LEDS; i++) {
+                ledMap.colors[i] = CRGB(255, 0, 0);
+                if(ledMap.colors[i] == CRGB(0, 0, 0)) {
+                    ledMap.colors[i] = CRGB(255, 255, 255);
+                } else {
+                    ledMap.colors[i] -= CRGB(1, 1, 1);
+                }
+            }
+        }
+};
+
 LEDMap leds;
+TwinkleEffect twinkleEffect;
 
 void setup() {
 
     FastLED.addLeds<NEOPIXEL, DATA_PIN>(leds.colors, NUM_LEDS);
-    leds.updateLEDColor(5, CRGB(255,255,255));
     Serial.println("Initialized LEDs");
 
     // MPU setup
@@ -44,11 +60,11 @@ void setup() {
         Serial.println("Could not find a valid MPU6050 sensor, check wiring!");
         delay(500);
     }
-
 }
 
 void loop() {
 
-//    FastLED.clear();
+    twinkleEffect.update(&leds);
+    Serial.println(leds.colors[0][0]);
     FastLED.show();
 }
