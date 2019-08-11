@@ -1,32 +1,10 @@
 #include <Wire.h>
 #include <MPU6050.h>
 #include <FastLED.h>
+#include "PixelMap.h"
 
-#define NUM_LEDS 60
-#define DATA_PIN 17
 
 MPU6050 mpu;
-
-struct coordinate {
-  int16_t theta;    // Angles [0, 360]
-  int16_t z;        // Vertical axis [0, 100]
-};
-
-class LEDMap {
-
-    public:
-        coordinate cords[NUM_LEDS];
-        CRGB colors[NUM_LEDS];
-
-        void clear();
-
-        void updateLEDColor(uint16_t led_index, CRGB color) {
-            colors[led_index] = color;
-        }
-
-        void setCoordinates(coordinate cords[]);
-        uint16_t getDistance(coordinate point_cord, uint16_t led_index);
-};
 
 class TwinkleEffect {
 
@@ -34,18 +12,44 @@ class TwinkleEffect {
 
         void update(LEDMap *ledMap) {
             for(int i = 0; i < NUM_LEDS; i++) {
-                ledMap.colors[i] = CRGB(255, 0, 0);
-                if(ledMap.colors[i] == CRGB(0, 0, 0)) {
-                    ledMap.colors[i] = CRGB(255, 255, 255);
+                if(!ledMap->colors[i]) {
+                    ledMap->colors[i] = CRGB(255, 255, 255);
                 } else {
-                    ledMap.colors[i] -= CRGB(1, 1, 1);
+                    ledMap->colors[i]--;
                 }
             }
         }
 };
 
+class RadarSweepEffect {
+    uint16_t angle;
+
+    public:
+        RadarSweepEffect(void);
+        void update(LEDMap *ledMap) {
+            angle = (angle + 1)%360;
+            for(int i = 0; i<NUM_LEDS; i++){
+                int16_t dist = ledMap->getThetaDistance(i, angle);
+                dist = map(dist, 0, 20, 255, 0);
+                if(dist < 0){
+                    dist = 0;
+                }
+                ledMap->colors[i].fadeToBlackBy(5);
+                if(CRGB(dist, dist, dist) > ledMap->colors[i]){
+                    ledMap->colors[i] = CRGB(dist, dist, dist);
+                }
+            }
+        }
+};
+RadarSweepEffect::RadarSweepEffect(void) {
+    angle = 0;
+}
+
 LEDMap leds;
 TwinkleEffect twinkleEffect;
+RadarSweepEffect radarSweepEffect;
+
+
 
 void setup() {
 
@@ -60,11 +64,14 @@ void setup() {
         Serial.println("Could not find a valid MPU6050 sensor, check wiring!");
         delay(500);
     }
+    FastLED.clear();
+
 }
 
 void loop() {
-
-    twinkleEffect.update(&leds);
+//    twinkleEffect.update(&leds);
+    radarSweepEffect.update(&leds);
     Serial.println(leds.colors[0][0]);
     FastLED.show();
+    delay(1);
 }
