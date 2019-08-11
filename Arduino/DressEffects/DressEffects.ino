@@ -20,21 +20,41 @@ class TwinkleEffect {
             }
         }
 };
+DEFINE_GRADIENT_PALETTE( heatmap_gp ) {
+  0,     0,  0,  0,   //black
+128,   0,0,  255,   //green
+200,   255,0,  255,   //bright yellow
+255,   255,255,255 }; //full white
+
+CRGBPalette256 myPal = heatmap_gp;
 
 class RadarSweepEffect {
+
     public:
+        uint8_t LED_color_indices[NUM_LEDS] = {0};
+
         void update(LEDMap *ledMap, int16_t angle) {
             angle = (angle + 1)%360;
             for(int i = 0; i<NUM_LEDS; i++){
                 int16_t dist = ledMap->getThetaDistance(i, angle);
-                dist = map(dist, 0, 20, 10, 0);
+                dist = map(dist, 0, 20, 255, 0);
                 if(dist < 0){
                     dist = 0;
                 }
-                ledMap->colors[i].fadeToBlackBy(5);
-                if(CRGB(dist, dist, dist) > ledMap->colors[i]){
-                    ledMap->colors[i] = CRGB(dist, dist, dist);
+
+                if(LED_color_indices[i] > 10){
+                    LED_color_indices[i] -= 10;
+                } else {
+                    LED_color_indices[i] = 0;
                 }
+                if(dist > LED_color_indices[i]) {
+                    LED_color_indices[i] = dist;
+                }
+                ledMap->colors[i] = ColorFromPalette(myPal, LED_color_indices[i]);
+//                ledMap->colors[i].fadeToBlackBy(20);
+//                if(CRGB(dist, dist, dist) > ledMap->colors[i]){
+//                    ledMap->colors[i] = CRGB(dist, dist, dist);
+//                }
             }
         }
 };
