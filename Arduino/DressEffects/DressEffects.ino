@@ -3,6 +3,7 @@
 #include <FastLED.h>
 #include <math.h>
 #include "PixelMap.h"
+//#include <Bounce2.h>
 
 
 
@@ -22,11 +23,20 @@ class TwinkleEffect {
 };
 DEFINE_GRADIENT_PALETTE( heatmap_gp ) {
   0,     0,  0,  0,   //black
-128,   0,0,  255,   //green
+128,   0,0,  255,
 200,   255,0,  255,   //bright yellow
 255,   255,255,255 }; //full white
 
 CRGBPalette256 myPal = heatmap_gp;
+
+//class BallsEffect {
+//
+//    public:
+//
+//    void update(LEDMap *ledMap, int16_t angle) {
+//
+//    }
+//}
 
 class RadarSweepEffect {
 
@@ -34,10 +44,9 @@ class RadarSweepEffect {
         uint8_t LED_color_indices[NUM_LEDS] = {0};
 
         void update(LEDMap *ledMap, int16_t angle) {
-            angle = (angle + 1)%360;
             for(int i = 0; i<NUM_LEDS; i++){
                 int16_t dist = ledMap->getThetaDistance(i, angle);
-                dist = map(dist, 0, 20, 255, 0);
+                dist = map(dist, 0, 30, 255, 0);
                 if(dist < 0){
                     dist = 0;
                 }
@@ -61,16 +70,21 @@ class RadarSweepEffect {
 
 class Torque {
     public:
-        void update(int16_t);
+        void update(int16_t, uint32_t dt);
         int16_t velocity;
         float torque;
 };
 
-void Torque::update(int16_t new_vel){
-    int16_t new_torque = new_vel - velocity;
+void Torque::update(int16_t new_vel, uint32_t dt){
+    float new_torque = (new_vel - velocity) / (float)dt * 100000.0;
     velocity = new_vel;
 //    torque = new_torque;
-    torque += (0.1) * (new_torque - torque);
+    torque += (((float)dt / 1000000) / 0.1) * (new_torque - torque);
+
+//    Serial.print(torque);
+//    Serial.print(" ");
+//    Serial.println((int16_t)velocity);
+
 }
 
 class Spinner {
@@ -78,7 +92,7 @@ class Spinner {
     Spinner();
     float angle;
     float velocity;
-    update(float, int16_t);
+    void update(float, int16_t, uint32_t);
 
 };
 
@@ -86,20 +100,20 @@ Spinner::Spinner(void){
     angle = 0;
     velocity = 0;
 }
-Spinner::update(float torque, int16_t gyro_velocity){
+void Spinner::update(float torque, int16_t gyro_velocity, uint32_t dt){
     float div;
-    if(torque * gyro_velocity > 0 && abs(gyro_velocity) > 100) { // If torque and velocity are in the same direction
-        velocity += torque / 10.0; // Increase velocity by torque
+    if(torque * gyro_velocity > 0 && abs(gyro_velocity) > 200) { // If torque and velocity are in the same direction
+        velocity += torque * (dt / 1000000.0) * 4; // Increase velocity by torque
     }
-    angle += velocity / 20;
+    angle += velocity * (dt / 1000000.0) * 2;
     div = angle / 360.0;
     div = floor(div);
     angle = angle - (div*360);
 
     if(velocity > 0){
-        velocity -= 1;
+        velocity -= 2;
     } else {
-        velocity += 1;
+        velocity += 2;
     }
 }
 
@@ -109,11 +123,23 @@ RadarSweepEffect radarSweepEffect;
 Torque torque;
 Spinner spin;
 MPU6050 mpu;
+elapsedMicros dt;
+
+uint8_t POWER_ENABLE_PIN = 0;
+uint8_t BUTTON_PIN = 1;
+uint8_t LED_pin = 13;
 
 void setup() {
 
+    pinMode(BUTTON_PIN, INPUT);
+    pinMode(POWER_ENABLE_PIN, OUTPUT);
+    pinMode(LED_pin, OUTPUT);
+    digitalWrite(POWER_ENABLE_PIN, HIGH);
+    digitalWrite(LED_pin, HIGH);
+
     FastLED.addLeds<NEOPIXEL, DATA_PIN>(leds.colors, NUM_LEDS);
     Serial.println("Initialized LEDs");
+
 
     // MPU setup
     Serial.begin(115200);
@@ -130,16 +156,95 @@ void setup() {
 
 }
 
+uint8_t STATE = 0;
+uint8_t MODE = 0;
+uint8_t MAX_MODE = 3;
+uint16_t POWER_OFF_TIME = 2000;
+
+void update_state(uint8_t button_press) {
+    static elapsedMillis button_held;
+
+    if( STATE == 0 ){
+        // Just powered on, button will be pressed and then transition to released
+        if(button_press == 0){
+            STATE = 1; // Button is released, transition to running STATE
+            Serial.println("Normal mode");
+        }
+    }
+    else if( STATE == 1 ){
+        // Normal state, button not pressed
+        if (button_press == 1){
+            button_held = 0; // Start timer for button press
+            STATE = 2; // Transition to button pressed state
+            Serial.println("Button pressed");
+        }
+    }
+    else if( STATE == 2){
+        // Button held down
+        if (button_press == 0){
+            MODE++;
+            MODE %= MAX_MODE;
+            STATE = 1; // Transition back to released state
+            Serial.println("Button released");
+            Serial.print("Mode: ");
+            Serial.println(MODE);
+        }
+        Serial.print("Button held: ");
+        Serial.println(button_held);
+        if (button_held > POWER_OFF_TIME){
+            Serial.println("Powering down...");
+            digitalWrite(POWER_ENABLE_PIN, LOW); // Button held down for too long, power down
+            STATE = 3; // Power down mode, shut down effects
+            MODE = MAX_MODE;
+        }
+    }
+
+}
+
+void handle_mode(LEDMap *leds){
+    static int16_t angle = 0;
+    static uint8_t prev_mode = 0;
+    static elapsedMillis t;
+    if (MODE != prev_mode) {
+        leds->clearAll();
+        prev_mode = MODE;
+    }
+    if (MODE == 0) {
+        radarSweepEffect.update(leds, angle);
+        angle++;
+        angle %= 360;
+    }
+    else if (MODE == 1) {
+        Vector rawGyro = mpu.readRawGyro();
+        torque.update(rawGyro.XAxis, dt);
+        spin.update(torque.torque, rawGyro.XAxis, dt);
+        radarSweepEffect.update(leds, spin.angle);
+    }
+    else if (MODE == 2) {
+        Vector rawGyro = mpu.readRawGyro();
+        Vector rawAccel = mpu.readRawAccel();
+//        Serial.print(t);
+//        Serial.print(" ");
+        Serial.print((int16_t)rawAccel.XAxis);
+        Serial.print(" ");
+        Serial.print((int16_t)rawAccel.YAxis);
+        Serial.print(" ");
+        Serial.print((int16_t)rawAccel.ZAxis);
+        Serial.print(" ");
+        Serial.print((int16_t)rawGyro.XAxis);
+        Serial.print(" ");
+        Serial.print((int16_t)rawGyro.YAxis);
+        Serial.print(" ");
+        Serial.println((int16_t)rawGyro.ZAxis);
+
+    }
+}
+
 void loop() {
-//    twinkleEffect.update(&leds);
-    Vector rawGyro = mpu.readRawGyro();
-    torque.update(rawGyro.XAxis);
-    spin.update(torque.torque, rawGyro.XAxis);
-    radarSweepEffect.update(&leds, spin.angle);
-//    Serial.print(spin.angle);
-//    Serial.print(" ");
-//    Serial.println(spin.velocity);
-//    Serial.println(static_cast<int16_t>(rawGyro.XAxis));
+
+    update_state(digitalRead(BUTTON_PIN));
+    handle_mode(&leds);
     FastLED.show();
+    dt = 0;
     delay(10);
 }
