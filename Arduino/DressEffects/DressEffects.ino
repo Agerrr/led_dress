@@ -175,6 +175,7 @@ IMUTracker imu_tracker;
 uint8_t POWER_ENABLE_PIN = 0;
 uint8_t BUTTON_PIN = 1;
 uint8_t LED_pin = 13;
+bool MPU_INITIALIZED = false;
 
 void setup() {
 
@@ -190,14 +191,16 @@ void setup() {
 
     // MPU setup
     Serial.begin(115200);
-    Serial.println("Initialized MPU6050");
 
-    while(!mpu.begin(MPU6050_SCALE_2000DPS, MPU6050_RANGE_2G)) {
-        Serial.println("Could not find a valid MPU6050 sensor, check wiring!");
-        delay(500);
+    if(mpu.begin(MPU6050_SCALE_2000DPS, MPU6050_RANGE_2G)) {
+        MPU_INITIALIZED = true;
+        Serial.println("Initialized MPU6050");
+        //    mpu.calibrateGyro();
+        mpu.setThreshold(3);
+
+    } else {
+        Serial.println("IMU not found, continuing in non-IMU mode");
     }
-    mpu.calibrateGyro();
-    mpu.setThreshold(3);
 
     FastLED.clear();
 
@@ -215,7 +218,6 @@ void update_state(uint8_t button_press) {
         // Just powered on, button will be pressed and then transition to released
         if(button_press == 0){
             STATE = 1; // Button is released, transition to running STATE
-            Serial.println("Normal mode");
         }
     }
     else if( STATE == 1 ){
@@ -223,7 +225,6 @@ void update_state(uint8_t button_press) {
         if (button_press == 1){
             button_held = 0; // Start timer for button press
             STATE = 2; // Transition to button pressed state
-            Serial.println("Button pressed");
         }
     }
     else if( STATE == 2){
@@ -232,12 +233,9 @@ void update_state(uint8_t button_press) {
             MODE++;
             MODE %= MAX_MODE;
             STATE = 1; // Transition back to released state
-            Serial.println("Button released");
             Serial.print("Mode: ");
             Serial.println(MODE);
         }
-        Serial.print("Button held: ");
-        Serial.println(button_held);
         if (button_held > POWER_OFF_TIME){
             Serial.println("Powering down...");
             digitalWrite(POWER_ENABLE_PIN, LOW); // Button held down for too long, power down
@@ -252,26 +250,40 @@ void handle_mode(LEDMap *leds){
     static int16_t angle = 0;
     static uint8_t prev_mode = 0;
     static elapsedMillis t;
-    float rawX;
     if (MODE != prev_mode) {
         leds->clearAll();
         prev_mode = MODE;
     }
     if (MODE == 0) {
         rainbowCylinderEffect.update(leds, angle);
-        angle++;
+        angle+= 2;
         angle %= 360;
     }
     else if (MODE == 1) {
-        Vector rawGyro = mpu.readRawGyro();
-        torque.update(rawGyro.XAxis, dt);
-        spin.update(torque.torque, rawGyro.XAxis, dt);
-        radarSweepEffect.update(leds, spin.angle);
+        if(MPU_INITIALIZED) {
+            Vector rawGyro = mpu.readRawGyro();
+            torque.update(rawGyro.XAxis, dt);
+            spin.update(torque.torque, rawGyro.XAxis, dt);
+            radarSweepEffect.update(leds, spin.angle);
+        }
+        else {
+            radarSweepEffect.update(leds, angle);
+            angle += 2;
+            angle %= 360;
+        }
+
     }
     else if (MODE == 2) {
-        Vector rawGyro = mpu.readRawGyro();
-        imu_tracker.update(rawGyro.XAxis, dt);
-        rainbowCylinderEffect.update(leds, imu_tracker.theta_x);
+        if(MPU_INITIALIZED) {
+            Vector rawGyro = mpu.readRawGyro();
+            imu_tracker.update(rawGyro.XAxis, dt);
+            rainbowCylinderEffect.update(leds, imu_tracker.theta_x);
+        }
+        else {
+            rainbowCylinderEffect.update(leds, angle);
+            angle += 2;
+            angle %= 360;
+        }
 //        Serial.println(imu_tracker.theta_x);
         // Vector rawAccel = mpu.readRawAccel();
 //        Serial.print(t);
@@ -295,6 +307,19 @@ void loop() {
 
     update_state(digitalRead(BUTTON_PIN));
     handle_mode(&leds);
+    static elapsedMillis MPU_initialize_timer;
+
+    if(!MPU_INITIALIZED) {
+        // IMU not initialized, attempt re-initializing every 1 second
+        if(MPU_initialize_timer > 1000) {
+            Serial.println("Re-attempting IMU initialization");
+            if(mpu.begin(MPU6050_SCALE_2000DPS, MPU6050_RANGE_2G)) {
+                MPU_INITIALIZED = true;
+                Serial.println("IMU found");
+            }
+            MPU_initialize_timer = 0;
+        }
+    }
     FastLED.show();
     dt = 0;
     delay(10);
