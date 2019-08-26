@@ -38,6 +38,21 @@ CRGBPalette256 myPal = heatmap_gp;
 //    }
 //}
 
+class RainbowCylinderEffect {
+
+    public:
+        void update(LEDMap *ledMap, int16_t angle) {
+            for(int i = 0; i<NUM_LEDS; i++){
+                uint16_t dist = ledMap->getPositiveThetaDistance(i, angle);
+                ledMap->colors[i] = CHSV(dist * 255 / 360, 255, 255);
+//                ledMap->colors[i].fadeToBlackBy(20);
+//                if(CRGB(dist, dist, dist) > ledMap->colors[i]){
+//                    ledMap->colors[i] = CRGB(dist, dist, dist);
+//                }
+            }
+        }
+};
+
 class RadarSweepEffect {
 
     public:
@@ -87,8 +102,33 @@ void Torque::update(int16_t new_vel, uint32_t dt){
 
 }
 
+class IMUTracker {
+    public:
+    IMUTracker();
+    float theta_x, theta_y, theta_z;
+    void update(int16_t, uint32_t);
+};
+
+IMUTracker::IMUTracker(void){
+    theta_x = 0;
+}
+
+void IMUTracker::update(int16_t dtheta_x, uint32_t dt){
+    int16_t div;
+    theta_x -= dtheta_x  * 0.068702f * 0.150f *  (dt / 1000000.0); // for 200 degrees/s
+
+    // Modulo 360 (for floating point)
+    div = theta_x / 360.0;
+    div = floor(div);
+    theta_x = theta_x - (div*360);
+    if(theta_x < 0){
+        theta_x += 360;
+    }
+}
+
 class Spinner {
     public:
+    float MAX_VELOCITY = 200;
     Spinner();
     float angle;
     float velocity;
@@ -102,10 +142,15 @@ Spinner::Spinner(void){
 }
 void Spinner::update(float torque, int16_t gyro_velocity, uint32_t dt){
     float div;
-    if(torque * gyro_velocity > 0 && abs(gyro_velocity) > 200) { // If torque and velocity are in the same direction
+    if(torque * gyro_velocity > 0 && abs(gyro_velocity) > 400) { // If torque and velocity are in the same direction
         velocity += torque * (dt / 1000000.0) * 4; // Increase velocity by torque
     }
-    angle += velocity * (dt / 1000000.0) * 2;
+//    if(velocity > MAX_VELOCITY){
+//        velocity = MAX_VELOCITY;
+//    } else if (velocity < -MAX_VELOCITY) {
+//        velocity = -MAX_VELOCITY;
+//    }
+    angle += velocity * (dt / 1000000.0) * 0.0687f;
     div = angle / 360.0;
     div = floor(div);
     angle = angle - (div*360);
@@ -120,10 +165,12 @@ void Spinner::update(float torque, int16_t gyro_velocity, uint32_t dt){
 LEDMap leds;
 TwinkleEffect twinkleEffect;
 RadarSweepEffect radarSweepEffect;
+RainbowCylinderEffect rainbowCylinderEffect;
 Torque torque;
 Spinner spin;
 MPU6050 mpu;
 elapsedMicros dt;
+IMUTracker imu_tracker;
 
 uint8_t POWER_ENABLE_PIN = 0;
 uint8_t BUTTON_PIN = 1;
@@ -205,12 +252,13 @@ void handle_mode(LEDMap *leds){
     static int16_t angle = 0;
     static uint8_t prev_mode = 0;
     static elapsedMillis t;
+    float rawX;
     if (MODE != prev_mode) {
         leds->clearAll();
         prev_mode = MODE;
     }
     if (MODE == 0) {
-        radarSweepEffect.update(leds, angle);
+        rainbowCylinderEffect.update(leds, angle);
         angle++;
         angle %= 360;
     }
@@ -222,20 +270,23 @@ void handle_mode(LEDMap *leds){
     }
     else if (MODE == 2) {
         Vector rawGyro = mpu.readRawGyro();
-        Vector rawAccel = mpu.readRawAccel();
+        imu_tracker.update(rawGyro.XAxis, dt);
+        rainbowCylinderEffect.update(leds, imu_tracker.theta_x);
+//        Serial.println(imu_tracker.theta_x);
+        // Vector rawAccel = mpu.readRawAccel();
 //        Serial.print(t);
 //        Serial.print(" ");
-        Serial.print((int16_t)rawAccel.XAxis);
-        Serial.print(" ");
-        Serial.print((int16_t)rawAccel.YAxis);
-        Serial.print(" ");
-        Serial.print((int16_t)rawAccel.ZAxis);
-        Serial.print(" ");
-        Serial.print((int16_t)rawGyro.XAxis);
-        Serial.print(" ");
-        Serial.print((int16_t)rawGyro.YAxis);
-        Serial.print(" ");
-        Serial.println((int16_t)rawGyro.ZAxis);
+//        Serial.print((int16_t)rawAccel.XAxis);
+//        Serial.print(" ");
+//        Serial.print((int16_t)rawAccel.YAxis);
+//        Serial.print(" ");
+//        Serial.print((int16_t)rawAccel.ZAxis);
+//        Serial.print(" ");
+//        Serial.print((int16_t)rawGyro.XAxis);
+//        Serial.print(" ");
+//        Serial.print((int16_t)rawGyro.YAxis);
+//        Serial.print(" ");
+//        Serial.println((int16_t)rawGyro.ZAxis);
 
     }
 }

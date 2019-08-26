@@ -114,6 +114,14 @@ class LEDMap {
             return dh + dtheta;
         }
 
+        uint16_t getPositiveThetaDistance(uint16_t led_index, int16_t theta) {
+            if(cords[led_index][0] >= theta) {
+                return cords[led_index][0] - theta;
+            } else {
+                return cords[led_index][0] + 360 - theta;
+            }
+        }
+
 
 };
 
